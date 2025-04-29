@@ -1,0 +1,159 @@
+SELECT * FROM yelp_businesses
+limit 10;
+SELECT * FROM yelp_REVIEWs limit 10;
+drop table tabl_yelp_reviews;
+
+CREATE or replace TABLE tabl_yelp_reviews as 
+SELECT review_text:business_id:: string as business_id,
+review_text:user_id:: string as user_id,
+review_text:date:: date as  review_date,
+review_text:stars:: number as review_star,
+review_text:text:: string as review_txt,
+analyze_sentiment(review_text)as sentiments,
+* FROM 
+YELP_REVIEWS;
+
+SELECT * FROM tabl_yelp_reviews
+limit 10;
+
+SELECT * FROM yelp_businesses LIMIT 10;
+
+
+CREATE or replace TABLE tabl_yelp_businesses as 
+SELECT review_text:business_id:: string as business_id,
+review_text:categories:: string as categories,
+review_text:name:: string as name,
+review_text:city:: string as city,
+review_text:state:: string as state,
+review_text:review_count:: string as review_count,
+review_text:stars:: string as stars FROM 
+YELP_BUSINESSES;
+
+select * from tabl_yelp_businesses ;
+
+-- Find the numbers of business in each category
+WITH CTE AS (SELECT
+business_id,trim(A.value) AS categories FROM tabl_yelp_businesses 
+,lateral split_to_table(categories,',') A)
+SELECT categories, COUNT(*) FROM CTE
+GROUP BY 1
+ORDER BY 2 DESC
+;
+
+-- Find the top 10 users who have reviewed the most business in the restaurant category 
+
+select user_id,count(distinct r.business_id) No_of_review from tabl_yelp_reviews r
+inner join tabl_yelp_businesses b
+on r.business_id=b.business_id
+where categories ilike '%restaurant%'
+group by 1
+order by 2 desc
+;
+
+-- find the most popular categories  of business (based on number of reviews)
+WITH CTE AS (SELECT
+business_id,trim(A.value) AS categories FROM tabl_yelp_businesses 
+,lateral split_to_table(categories,',') A)
+SELECT categories, COUNT(*) as No_of_reviews FROM CTE
+GROUP BY 1
+ORDER BY 2 DESC;
+
+-- Find the top 3 most recent reviews for each business.
+with cte as 
+(select *,b.name, row_number() over(partition by r.business_id order by review_date) as rn from tabl_yelp_reviews r
+inner join tabl_yelp_businesses b
+on r.business_id=b.business_id  )
+select * from cte where rn <= 3;
+
+-- find the month with highest number of reviews
+select month(review_date),count(review_text) from tabl_yelp_reviews
+group by 1
+order by 2 desc;
+
+-- Find the percentage of 5 star reviews for each businesss
+with review_counts as (select business_id,
+count(*) as total_reviews,
+sum(case when review_star = 5 then 1 else 0 end) as five_star_reviews
+from tabl_yelp_reviews
+group by business_id
+)
+select 
+    business_id,
+    (five_star_reviews * 100.0 / total_reviews) as five_star_percentage
+from review_counts;
+
+select r.business_id,b.name,count(*) as total_reviews,
+sum(case when review_star= 5 then 1 else 0 end ) as FiveStarReview,
+FiveStarReview * 100/total_reviews as PercentFiveStar
+from tabl_yelp_reviews r
+inner join tabl_yelp_businesses b
+on r.business_id=b.business_id
+group by 1,2;
+
+-- find the top  5 most reviewed businesses in each city 
+with cte as (
+select b.name,b.city,count(review_txt) as total_review from tabl_yelp_reviews r
+inner join tabl_yelp_businesses b on r.business_id=b.business_id 
+group by 1,2
+order by 3 desc)
+select * from cte
+qualify row_number() over(partition by city order by total_review desc) <=5;
+
+-- Find number of reviews posted in each year
+SELECT 
+  YEAR(review_date) AS review_year,
+  COUNT(*) AS total_reviews
+FROM tabl_yelp_reviews
+GROUP BY review_year
+ORDER BY review_year;
+-- Calculate average days between first and last review for each business
+SELECT 
+  business_id,
+  DATEDIFF('day', MIN(review_date), MAX(review_date)) AS active_days
+FROM tabl_yelp_reviews
+GROUP BY business_id;
+-- Find reviews posted in the last 90 days
+SELECT *
+FROM tabl_yelp_reviews
+WHERE review_date >= DATEADD('day', -90, CURRENT_DATE());
+-- Count reviews posted on weekends vs weekdays
+SELECT 
+  CASE 
+    WHEN DAYOFWEEK(review_date) IN (1, 7) THEN 'Weekend'
+    ELSE 'Weekday'
+  END AS day_type,
+  COUNT(*) AS total_reviews
+FROM tabl_yelp_reviews
+GROUP BY day_type;
+-- Number of reviews submitted each quarter
+SELECT 
+  DATE_TRUNC('quarter', review_date) AS review_quarter,
+  COUNT(*) AS total_reviews
+FROM tabl_yelp_reviews
+GROUP BY review_quarter
+ORDER BY review_quarter;
+
+-- Find reviews that contain the word 'service' (case-insensitive)
+SELECT *
+FROM tabl_yelp_reviews
+WHERE LOWER(review_txt) LIKE '%service%';
+-- Count how many reviews are in all caps (shouting reviews!)
+SELECT COUNT(*) AS shouting_reviews
+FROM tabl_yelp_reviews
+WHERE review_txt = UPPER(review_txt)
+  AND CHAR_LENGTH(review_txt) > 10;
+-- Extract reviews where the length of the review is more than 500 characters
+SELECT *
+FROM tabl_yelp_reviews
+WHERE CHAR_LENGTH(review_txt) > 500;
+-- Clean review text by removing all special characters (basic regex cleaning)
+SELECT 
+  REGEXP_REPLACE(review_txt, '[^A-Za-z0-9 ]', '', 'g') AS cleaned_text
+FROM tabl_yelp_reviews
+LIMIT 10;
+-- Create a new column showing word count of each review
+SELECT 
+  review_txt,
+  ARRAY_SIZE(SPLIT(review_txt, ' ')) AS word_count
+FROM tabl_yelp_reviews
+LIMIT 10;
